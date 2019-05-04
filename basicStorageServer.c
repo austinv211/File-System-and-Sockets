@@ -1,67 +1,29 @@
-#include <stdio.h>;
-#include <stdlib.h>;
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <netinet/ip.h> 
-#include <string.h>
-#define BLOCK_SIZE 128
-#define SERVER_PORT 8000
-#define BUFFER_SIZE 1024
-
-//define a struct for the block
-struct block {
-    char data[BLOCK_SIZE];
-};
-
-//define our struct for sockets to use
-struct sockaddr {
-    //Address Family (I.E AF_INET)
-    unsigned short sa_family;
-    //Family-Specific Address Info
-    char sa_data[14]; 
-};
-
-struct in_addr {
-    //Internet Address (32-bit)
-    unsigned long s_addr; 
-};
-
-struct sockaddr_in {
-    //Internet Protocol (AF_INET);
-    unsigned short sin_family;
-    //Address Port (16-bit); 
-    unsigned short sin_port;
-    //Internet Address (32-bit); 
-    struct in_addr sin_addr; 
-    //Not used
-    char sin_zero[8]; 
-};
+#include "socketedFileSystem.h"
 
 //get a block pointer
 struct block* block_data;
 int file_descriptor;
 int file_size;
 char buffer[BUFFER_SIZE];
-char reader[BLOCK_SIZE + 1];
+char reader[BLOCK_SIZE + 2];
+int isConnected = 1;
 
+int createDiskFile(char* fileName);
 
 int main(int argc, char* argv[]) {
 
     //define our variables used in main
-    int num_tracks;
-    int num_sectors;
     char* fileName;
-    char* info = (char * )malloc(sizeof(char) * BUFFER_SIZE);
-    int num_blocks;
-    int socket_fd;
+    int server_fd;
     int client_fd;
-    int num_read = 0;
-    struct sockaddr_in server_address, client_address;
-    socklen_t socket_length;
-    int protocol_cmd;
-    int track_num, sector_num, block_write_length, buffer_start = 0;
+    struct sockaddr_in address;
+    int socket_length;
+    char protocol_cmd;
+    int cylinder_num, sector_num = 0;
+    int num_read;
+    char *errorLine = "Invalid Syntax";
+    char* sendData;
+    char* writeData;
 
     //check command line args length
     if (argc != 4) {
@@ -86,7 +48,7 @@ int main(int argc, char* argv[]) {
         switch (i)
         {
             case 1:
-                num_tracks = (int)repLong;
+                num_cylinders = (int)repLong;
                 break;
             case 2:
                 num_sectors = (int)repLong;
@@ -97,103 +59,159 @@ int main(int argc, char* argv[]) {
     }
 
     //get the filename from the commandline args
-    fileName = argv[4];
+    fileName = argv[3];
 
-    //calculate the file size
-    file_size = num_tracks * num_sectors * BLOCK_SIZE;
+    //create the diskfile
+    create_disk(fileName);
 
-    //calculate the number of blocks
-    num_blocks = num_tracks * num_sectors;
+    printf("\nNum Cylinders: %d\n", num_cylinders);
+    printf("Num Blocks: %d\n", disk_size());
+    printf("File Size: %d\n", file_size);
+
+    //get the file descriptor representation of the file
+    //file_descriptor = get_disk_file();
+
 
     //create an endpoint and assign to our socket file descriptor
-    if ((socket_fd = socket(AF_INET, SOCK_STREAM, 0)) > 0) {
-        perror("Error Creating Endpoint.");
-        return -1;
-    }
+	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) 
+	{ 
+		perror("socket failed"); 
+		return -1;
+	} 
 
     //set our server address properties
-    server_address.sin_family = AF_INET; //Set the Internet protocol
-    server_address.sin_addr.s_addr = htonl(INADDR_ANY);  //set the address, INADDR_ANY binds the socket to all available interfaces
-    server_address.sin_port = htons(SERVER_PORT);
+	address.sin_family = AF_INET; 
+	address.sin_addr.s_addr = INADDR_ANY; 
+	address.sin_port = htons(SERVER_PORT); 
 
-    //bind our socket
-    if (bind(socket_fd, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
-        perror("Error Binding Socket.");
-        return -1;
-    }
+	// bind our socket
+	if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) 
+	{ 
+		perror("bind failed"); 
+		return -1;
+	} 
 
     //place the socket in a state where it is listening for a connection
-    listen(socket_fd, 5);
-
+	if (listen(server_fd, 3) < 0) 
+	{ 
+		perror("listen"); 
+		return -1;
+	}
 
     //create an infinite loop to wait for a connection
-    while(1) {
+    while(isConnected) {
         //print that we are waiting for a connectin
-        printf("Waiting for a connection ...");
-        //assign the socket_length
-        socket_length = sizeof(client_address);
-        //accept the connection and assign to the client file descriptor
-        if ((client_fd = accept(socket_fd, (struct sockaddr*)&client_address, &socket_length)) > 0) {
-            perror("Client FD Error");
-            continue;
-        }
-    
+        printf("\nWaiting for a connection ...\n");
 
+        //assign the socket_length
+        socket_length = sizeof(address);
+
+        if ((client_fd = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&socket_length))<0) 
+        { 
+            perror("accept"); 
+            return -1;
+        } 
+
+        //print the sucess result
+        printf("Accepting Connection Successful..\n");
+    
         //create an infinite loop to gather client commands
-        while(1) {
-            num_read = (client_fd, buffer, BUFFER_SIZE);
+        while(isConnected) {
+            //read from the client
+            num_read = read(client_fd, buffer, BUFFER_SIZE);
 
             //check to see if the number read from the client into the buffer is equal to 0
             if (num_read == 0) {
-                printf("Closing Client...");
+                printf("Closing Client...\n");
                 break;
             }
 
-            //set the null byte at the end of the buffer
-            buffer[num_read] = '\0';
-
             //scan in the request
-            sscanf(buffer,"%c %d %d %d %n", &protocol_cmd, &track_num, &sector_num, &block_write_length, &buffer_start);
+            int buffer_count_received = strlen(buffer);
+            char delim[] =  " ";
+            char* ptr = strtok(buffer, delim);
+
+            int counter = 1;
+            int isDone = 0;
+
+            while (ptr != NULL) {
+                switch (counter) {
+                    case 1:
+                        protocol_cmd = ptr[0];
+                        break;
+                    case 2:
+                        cylinder_num = (int) strtol(ptr, (char **)NULL, 10);
+                        break;
+                    case 3:
+                        sector_num = (int) strtol(ptr, (char **)NULL, 10);
+                        break;
+                    case 4:
+                        writeData = ptr;
+                        break;
+                    default:
+                        isDone = 1;
+                        break;
+                }
+
+                counter++;
+
+                ptr = strtok(NULL, delim);
+
+                if (isDone) {
+                    break;
+                }        
+            }
 
             //print out the request received
-            printf("\nRecieved Request: %s\n", buffer);
+            printf("\nReceived Protocol: %c\n", protocol_cmd);
 
             //convert to the upper variant of the command character recieved
             protocol_cmd = toupper(protocol_cmd);
+
+            switch (protocol_cmd)
+            {
+                /*
+                I is an information request. The disk returns two integers representing the disk geometry:
+                the number of cylinders, and the number of sectors per cylinder
+                */
+                case 'I':
+                    asprintf(&sendData, "%d %d", num_cylinders, num_sectors);
+                    send(client_fd, sendData, strlen(sendData), 0);
+                    printf("Sent Disk Info\n");
+                    break;
+                /*
+                R is a read request for the contents of the cylinder c sector s. The disk returns 'I' followed by those
+                128 bytes of information, or '0' if no such block exists. (This will return whatever data happens
+                to be on the disk in a given sector, even if nothing has ever been explicitly written there before)
+                */
+                case 'R':
+                    //get the data from the block
+                    disk_read(cylinder_num, sector_num, reader);
+                    if(strlen(reader) == 0) {
+                        send(client_fd, "0", 1, 0);
+                    }
+                    else {
+                        send(client_fd, reader, sizeof(reader), 0);
+                    }
+                    printf("Sent Read Data\n");
+                    break;
+                case 'W':
+                    disk_write(cylinder_num, sector_num, writeData);
+                    asprintf(&sendData, "Wrote to: (%d, %d)", num_cylinders, num_sectors);
+                    send(client_fd, sendData, strlen(sendData), 0);
+                    printf("Sent Write Data\n");
+                    break;
+                default:
+                    send(client_fd, errorLine, strlen(errorLine), 0);
+                    printf("Sent Error Line\n");
+                    break;
+            }
         }
 
         //close the client file descriptor
         close(client_fd);
     }
 
-    free(info);
+    // free(info);
 
-}
-
-
-int createDiskFile(char* fileName) {
-    //define our result variable
-    int result;
-
-    //create our file descriptor and use O_RDRW so that it can be read and written to
-    // use O_CREAT to create the file if it does not exist
-    // mode_t 0600 allows the owner to read and write
-    file_descriptor = open(fileName, O_RDWR | O_CREAT, (mode_t) 0600);
-
-    //catch the error description for the file descriptor
-    if (file_descriptor == -1) {
-        perror("Issue Creating Disk File.");
-        return -1;
-    }
-
-    //set the result the the lseek result
-    //we are spanning the file to the size of the disk
-    if (lseek(file_descriptor, file_size, SEEK_SET) == -1) { 
-        close(file_descriptor);
-        perror("Error spanning the file to the correct size.");
-        return -1;
-    }
-
-    //fill out a last byte in the file
-    lseek(file_descriptor, 0, SEEK_SET);
 }
