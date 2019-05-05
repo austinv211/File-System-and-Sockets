@@ -12,6 +12,7 @@ int file_size;
 int num_blocks;
 int num_writes = 0;
 int num_reads = 0;
+int microsecond_delay = 0;
 
 int create_disk(char* fileName) {
     //open the file for both reading and writing and the ability to store binary files
@@ -60,10 +61,15 @@ void disk_read( int cylinder, int sector, char buffer[])
 	Based on the cylinder ‘c’ and sector ‘s’, to calculate the block index is
 	: block index = （c-1） * (# of sectors on the disk) + s
 	*/
+	printf("(%d, %d)\n", cylinder, sector);
+
 	int blocknum = (cylinder - 1) * (num_sectors) + sector;
 
 	//perform a sanity check on the block number and data pointer
 	sanity_check(blocknum);
+
+	//wait for the time delay
+	usleep(microsecond_delay);
 
 	//seek the disk file for the correct data
 	fseek(diskFile, blocknum * BLOCK_SIZE,SEEK_SET);
@@ -83,6 +89,9 @@ void disk_write( int cylinder, int sector, char *data)
 	int blocknum = (cylinder - 1) * (num_sectors) + sector;
 
 	sanity_check(blocknum);
+
+	//wait for the time delay
+	usleep(microsecond_delay);
 
 	fseek(diskFile,blocknum * BLOCK_SIZE,SEEK_SET);
 

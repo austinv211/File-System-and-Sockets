@@ -19,20 +19,21 @@ int main(int argc, char* argv[]) {
     struct sockaddr_in address;
     int socket_length;
     char protocol_cmd;
-    int cylinder_num, sector_num = 0;
+    int cylinder_num, sector_num, num_bytes = 0;
     int num_read;
     char *errorLine = "Invalid Syntax";
     char* sendData;
-    char* writeData;
+    int numChars = BLOCK_SIZE / (int) sizeof(char);
+    char* writeData = (char*) malloc(numChars * sizeof(char));
 
     //check command line args length
-    if (argc != 4) {
+    if (argc != 5) {
         perror("Incorrect number of args provided. Syntax is .\\basicStorageServer <#Tracks> <#Sectors> <Disk File Name>");
         return 1;
     }
 
     //get the number of tracks and sectors commandline args and strtol, with error handling
-    for (int i = 1; i < 3; i++) {
+    for (int i = 1; i < 4; i++) {
         char *end;
         long repLong = strtol(argv[i], &end, 10);
 
@@ -41,7 +42,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         else if(*end != '\0') {
-            fprintf(stderr, "Invalid characters in arg # %d for numPassengers.\n", i);
+            fprintf(stderr, "Invalid characters in arg # %d.\n", i);
             return 1;
         }
             
@@ -52,14 +53,17 @@ int main(int argc, char* argv[]) {
                 break;
             case 2:
                 num_sectors = (int)repLong;
-                break;             
+                break;   
+            case 3:
+                microsecond_delay = (int)repLong;
+                break;     
             default:
                 break;
         }
     }
 
     //get the filename from the commandline args
-    fileName = argv[3];
+    fileName = argv[4];
 
     //create the diskfile
     create_disk(fileName);
@@ -146,6 +150,13 @@ int main(int argc, char* argv[]) {
                         sector_num = (int) strtol(ptr, (char **)NULL, 10);
                         break;
                     case 4:
+                        num_bytes = (int) strtol(ptr, (char **)NULL, 10);
+                        if (num_bytes > 128) {
+                            perror("Number Of Bytes Provided is Too Large");
+                            return -1;
+                        }
+                        break;
+                    case 5:
                         writeData = ptr;
                         break;
                     default:
@@ -196,8 +207,11 @@ int main(int argc, char* argv[]) {
                     printf("Sent Read Data\n");
                     break;
                 case 'W':
+                    if (num_bytes < BLOCK_SIZE) {
+                        memset(writeData + num_bytes, '0', BLOCK_SIZE - num_bytes);
+                    }
                     disk_write(cylinder_num, sector_num, writeData);
-                    asprintf(&sendData, "Wrote to: (%d, %d)", num_cylinders, num_sectors);
+                    asprintf(&sendData, "Wrote to: (%d, %d)", cylinder_num, sector_num);
                     send(client_fd, sendData, strlen(sendData), 0);
                     printf("Sent Write Data\n");
                     break;
@@ -212,6 +226,5 @@ int main(int argc, char* argv[]) {
         close(client_fd);
     }
 
-    // free(info);
 
 }
