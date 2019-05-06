@@ -1,4 +1,6 @@
-all: clientA.c clientB.c basicStorageServer.c
-	gcc clientA.c -o ClientA
-	gcc clientB.c -o ClientB
-	gcc basicStorageServer.c -o BasicServer
+all: clientA.c clientB.c basicStorageServer.c server_cpp.cpp SC.cpp
+	gcc clientA.c -o Problem3ClientA
+	gcc clientB.c -o Problem3ClientB
+	gcc basicStorageServer.c -o Problem3Server
+	g++ server_cpp.cpp -o Problem1Server -pthread
+	g++ SC.cpp -o Problem1Client
